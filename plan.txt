@@ -1,0 +1,6 @@
+1. Make packets into a class = DONE
+2. When receiving data append all into buffer
+3. After append call split_packets
+4. If split_packets doesn't return any packets append to buffer again
+5. split_packets returns a packet and the left over binary
+6. Plot the packet & keep appending to buffer

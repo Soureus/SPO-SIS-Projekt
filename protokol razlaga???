@@ -1,0 +1,11 @@
+stuffed = nekaj bytov je zamenjanih z drugimi(npr. 0xFF → 0xFE 0x01)
+
+packet:
+    FF FF: 2B (signalira zacetek paketa)
+    counter: 1B
+    [Stuffed payload:
+        timestamp (4-5 bytes)
+        packet_size (uint16 = 2B)
+        chunks [Header + Data]*
+        CRC16 (2-3 bytes)
+    ]
