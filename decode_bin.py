@@ -90,7 +90,7 @@ def parse_data(recorded_data: bytes) -> struct:
         }
     
     
-def decode_recording(recorded_data: bytes) -> tuple[list[raw_packet], list[packet]]:
+def decode_recording(recorded_data: bytes) -> tuple[list[raw_packet], list[Packet]]:
     raw_packet_bytes = split_packets(recorded_data)
     
     decoded_raw_packets = []
@@ -113,7 +113,7 @@ def decode_recording(recorded_data: bytes) -> tuple[list[raw_packet], list[packe
         
     return decoded_raw_packets, all_packets
     
-def get_sensor_samples(packet: bytes, sensor_id: int) -> tuple[int, int[list[int]]]:
+def get_sensor_samples(packet: bytes, sensor_id: int) -> tuple[int, list[list[int]]]:
     """
     Takes a packet and returns packet timestamp + all samples for one sensor
     i.e [timestamp, [[x,y,z], [x,y,z], ... ]]
@@ -328,7 +328,7 @@ def raw_packet_to_packet(i_raw_packet: raw_packet) -> list[Packet]:
             ))
     return packets
 
-def check_missing_packets(raw_packets: list[raw_packets]) -> list[tuple[int, int]]:
+def check_missing_packets(raw_packets: list[raw_packet]) -> list[tuple[int, int]]:
     """
     Takes in raw packets and returns a list of jumps.
     Return: list[[missing_packet_num, actuall packet_num]]
