@@ -22,13 +22,14 @@ SYNC = b"\xFF\xFF"
 
 SENSOR_FORMATS = {
     0x01: {"dtype": np.int16, "coords": 3, "bytes_per_value": 2, "scale": 0.00875, "unit": "deg/s"},
-    0x02: {"dtype": np.int16, "coords": 3, "bytes_per_value": 2, "scale": 0.001,   "unit": "g"},
-    0x03: {"dtype": np.int16, "coords": 3, "bytes_per_value": 2, "scale": 0.15,    "unit": "mGauss"},
+    0x02: {"dtype": np.int16, "coords": 3, "bytes_per_value": 2, "scale": 0.00006125,   "unit": "g"},
+    0x03: {"dtype": np.int16, "coords": 3, "bytes_per_value": 2, "scale": 0.0015,    "unit": "mGauss"},
 }
 
 def split_packets(raw: bytes) -> list[bytes]:
     """
-    Takes recorded bytes as input parameter and returns seperated packets
+    Takes recorded bytes as input parameter and returns seperated packets.
+    Only use this for already complete data, will break if used on live data received from a sensor.
     
     Return type: list[bytes]
     Each list entry is one seperated packet
@@ -43,6 +44,89 @@ def split_packets(raw: bytes) -> list[bytes]:
         packets.append(raw[starts[i]:starts[i+1]]) #en entry v packets bodo vsi byty od konca prejsnjega do zacetka naslednjega paketa
         
     return packets
+
+def find_sync(buffer: bytes, start: int = 0) -> int:
+    """ 
+    Helper function for finding sync marker in an underfined length of bytes
+    """
+    for i in range(start, len(buffer) - 1):
+        if buffer[i:i+2] == SYNC:
+            return i
+    return -1
+
+def extract_packets_from_buffer(buffer: bytes) -> tuple[list[bytes], bytes]:
+    """
+    Extracts all complete packets from a live byte buffer.
+    
+    Returns:
+        [list_of_complete_raw_packets, leftover_buffer]
+    Return Type: tuple[list[bytes], bytes]
+    """
+    
+    packets = []
+    
+    while True:
+        sync_pos = find_sync(buffer, 0)
+        if sync_pos == -1:
+            if buffer.endswith(b"0xFF"):
+                return packets, b"0xFF"
+            return packets, b""
+        
+        #discard junk before sync if any
+        if sync_pos > 0:
+            buffer = buffer[sync_pos:]
+            sync_pos = 0
+            
+        #min packet is sync + counter + some payload bytes
+        if len(buffer) < 3:
+            return packets, buffer
+        
+        #determine packet size
+        stuffed_payload = buffer[3:]
+        unsuffed = bytearray()
+        
+        #we need packet length to see if the whole packet has been transfered, so we unstuff the payload to get the whole size
+        j = 0
+        while j < len(stuffed_payload) and len(unsuffed) < 6: #timestamp + packet_size
+            if stuffed_payload[j] == 0xFE:
+                if j+1 >= len(stuffed_payload):
+                    return packets, buffer
+                unsuffed.append(0xFE ^ stuffed_payload[j+1])
+                j += 2
+            else:
+                unsuffed.append(stuffed_payload[j])
+                j += 1
+                
+        if len(unsuffed) < 6:
+            return packets, buffer
+        
+        packet_size = int.from_bytes(unsuffed[4:6], "little") + 1
+        expected_size = 4 + 2 + packet_size + 2
+        
+        #continue unstuffing
+        while j < len(stuffed_payload) and len(unsuffed) < expected_size:
+            if stuffed_payload[j] == 0xFE:
+                if j+1 >= len(stuffed_payload):
+                    return packets, buffer
+                unsuffed.append(0xFE ^ stuffed_payload[j+1])
+                j += 2
+            else:
+                unsuffed.append(stuffed_payload[j])
+                j += 1
+                
+        if len(unsuffed) < expected_size:
+            return packets, buffer
+        
+        packet_len_in_buffer = 2 + 1 + j #sync + counter + payload
+        packet_bytes = buffer[:packet_len_in_buffer]
+        packets.append(packet_bytes)
+        
+        buffer = buffer[packet_len_in_buffer:]
+        
+        if not buffer:
+            return packets, b""
+            
+        
 
 def unstuff_bytes(data: bytes) -> bytes:
     """
@@ -170,9 +254,11 @@ def create_sensor_matrix(packets: list[bytes], sensor_id: int, scale:float) -> t
     
     return avg_fvz, data
 
-def sestavi_podatke(packet_list: list[Packet]) -> tuple[float, np.ndarray]:
+def sestavi_podatke(packet_list: list[Packet], max_gap: float = 0.2) -> tuple[float, np.ndarray]:
     """
     Takes in a list of already parsed packets and returns sampling frequency and a full signal matrix
+    
+    max_gap: gaps larger than this are ignored for fs estimation. Needed due to data recordings allowing pausing
     
     Return: [fvz, signal]
     """
@@ -188,7 +274,7 @@ def sestavi_podatke(packet_list: list[Packet]) -> tuple[float, np.ndarray]:
         
         if i > 0:
             dt = packet.ts - packet_list[i-1].ts
-            if dt > 0:
+            if 0 < dt <= max_gap:
                 tpacket_values.append(dt)
                 nvz_values.append(packet.data.shape[0])
                 
